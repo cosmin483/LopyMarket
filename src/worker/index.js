@@ -5,8 +5,8 @@ import { pool, query, migrate } from './db.js';
 import { normalizeTrade, fetchRecentTrades } from './polymarket.js';
 import { handleTrade, stats } from './ingest.js';
 import { startRtds, rtdsState } from './rtds.js';
-import { settleOpenBets } from './paper.js';
-import { queueSize, queueWallet } from './wallets.js';
+import { settleOpenBets, refreshOpenBetPrices, snapshotEquity } from './paper.js';
+import { queueSize, queueWallet, SCORE_VERSION } from './wallets.js';
 import { log } from './log.js';
 
 if (!config.databaseUrl) {
@@ -49,6 +49,8 @@ async function heartbeat() {
     config: {
       minTradeUsd: config.minTradeUsd,
       signalThreshold: config.signalThreshold,
+      startBankroll: config.startBankroll,
+      excludeSports: config.excludeSports,
       stakeUsd: config.stakeUsd,
       markDelaysSec: config.markDelaysSec,
     },
@@ -62,6 +64,28 @@ async function heartbeat() {
 
 async function settle() {
   await settleOpenBets();
+}
+
+async function revalue() {
+  await refreshOpenBetPrices();
+}
+
+async function snapshot() {
+  await snapshotEquity();
+}
+
+// When the scoring rules change, demote old suspects until they are rescored.
+async function rescoreOutdated() {
+  const { rows } = await query(
+    `SELECT address FROM wallets WHERE suspect AND score_version IS DISTINCT FROM $1`,
+    [SCORE_VERSION]
+  );
+  await query(
+    `UPDATE wallets SET suspect = false, scored_at = 0 WHERE score_version IS DISTINCT FROM $1`,
+    [SCORE_VERSION]
+  );
+  rows.forEach((r) => queueWallet(r.address));
+  if (rows.length) log(`rescoring ${rows.length} suspects with scoring v${SCORE_VERSION}`);
 }
 
 // Rescore wallets we've seen trade big recently, so track records include newly resolved markets.
@@ -86,6 +110,7 @@ async function prune() {
 async function main() {
   await migrate();
   log('database ready');
+  await rescoreOutdated();
 
   let stopRtds = () => {};
   if (config.enableRtds) {
@@ -94,6 +119,8 @@ async function main() {
   every(config.restPollMs, restPoll);
   every(30000, heartbeat);
   every(config.resolveEveryMs, settle);
+  every(config.priceRefreshMs, revalue);
+  every(config.equitySnapshotMs, snapshot);
   every(60 * 60 * 1000, rescoreRecent);
   every(6 * 60 * 60 * 1000, prune);
   every(60000, async function summary() {

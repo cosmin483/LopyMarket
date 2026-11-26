@@ -25,7 +25,7 @@ export function poissonBinomialTail(ps, wins) {
 // `markets` maps condition_id -> { status, winning_index }.
 // A "position" is one (market, outcome) the wallet bought. Its implied win
 // probability is the average price it paid — what the market thought at the time.
-export function walletTrackRecord(trades, markets, { minPositionUsd = 20 } = {}) {
+export function walletTrackRecord(trades, markets, { minPositionUsd = 20, maxEntry = 1, excludeSports = false } = {}) {
   const positions = new Map();
   for (const t of trades) {
     if (t.outcome_index === null || t.outcome_index === undefined) continue;
@@ -52,8 +52,10 @@ export function walletTrackRecord(trades, markets, { minPositionUsd = 20 } = {})
     if (p.buyCost < minPositionUsd || p.buyShares <= 0) continue;
     const m = markets.get(p.condition_id);
     if (!m || m.status !== 'resolved') continue;
+    if (excludeSports && m.is_sports) continue;
     const won = m.winning_index === p.outcome_index;
     const entry = Math.min(0.999, Math.max(0.001, p.buyCost / p.buyShares));
+    if (entry > maxEntry) continue;
     const held = Math.max(0, p.buyShares - p.sellShares);
     probs.push(entry);
     if (won) wins++;
@@ -74,14 +76,15 @@ export function walletTrackRecord(trades, markets, { minPositionUsd = 20 } = {})
     wins,
     expected_wins: expected,
     z_score: z,
+    edge: n ? (wins - expected) / n : 0,
     log10_p: Math.max(-300, log10p),
     cost_resolved: cost,
     pnl_resolved: pnl,
   };
 }
 
-export function isSuspect(rec, { minResolved, maxLog10P }) {
-  return rec.n_resolved >= minResolved && rec.log10_p <= maxLog10P && rec.pnl_resolved > 0;
+export function isSuspect(rec, { minResolved, maxLog10P, minEdge = 0 }) {
+  return rec.n_resolved >= minResolved && rec.log10_p <= maxLog10P && rec.pnl_resolved > 0 && rec.edge >= minEdge;
 }
 
 // Early-warning score for a single BUY trade (0..100) with human-readable reasons.

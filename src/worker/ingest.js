@@ -4,6 +4,8 @@ import { query } from './db.js';
 import { scoreTrade } from './scoring.js';
 import { getWallet, ensureWalletScored, queueWallet } from './wallets.js';
 import { openBet } from './paper.js';
+import { getMarkets } from './markets.js';
+import { looksLikeSports } from './polymarket.js';
 import { log } from './log.js';
 
 export const stats = { seen: 0, stored: 0, signals: 0, bets: 0, errors: 0 };
@@ -46,6 +48,16 @@ async function act(trade, strategy, score, reasons) {
   if (betId) stats.bets++;
 }
 
+async function isSports(trade) {
+  if (looksLikeSports(trade.title)) return true;
+  try {
+    const m = (await getMarkets([trade.condition_id])).get(trade.condition_id);
+    return !!m?.is_sports;
+  } catch {
+    return false;
+  }
+}
+
 export async function handleTrade(trade) {
   if (!trade) return;
   stats.seen++;
@@ -55,8 +67,13 @@ export async function handleTrade(trade) {
     if (!inserted) return; // already handled when the other feed delivered it
     stats.stored++;
 
-    const copyable = trade.side === 'BUY' && trade.price <= config.copyMaxPrice;
-    if (!copyable) {
+    const tooOld = trade.received_at - trade.trade_ts > config.maxSignalAgeSec * 1000;
+    const copyable =
+      trade.side === 'BUY' &&
+      trade.price <= config.copyMaxPrice &&
+      trade.outcome_index !== null && // combos/parlays have no single outcome to copy
+      !tooOld;
+    if (!copyable || (config.excludeSports && (await isSports(trade)))) {
       queueWallet(trade.wallet);
       return;
     }

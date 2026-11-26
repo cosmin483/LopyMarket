@@ -16,7 +16,8 @@ export async function getMarkets(conditionIds, { maxAgeMs = OPEN_REFRESH_MS } = 
   for (const id of ids) {
     const r = cached.get(id);
     // Settled markets never change; open ones get refreshed when stale.
-    if (r && (r.status !== 'open' || now - r.fetched_at < maxAgeMs)) result.set(id, r);
+    // Rows cached before sports detection existed (is_sports null) are refetched once.
+    if (r && r.is_sports !== null && (r.status !== 'open' || now - r.fetched_at < maxAgeMs)) result.set(id, r);
     else stale.push(id);
   }
 
@@ -24,12 +25,12 @@ export async function getMarkets(conditionIds, { maxAgeMs = OPEN_REFRESH_MS } = 
     const fresh = await fetchMarkets(stale);
     for (const m of fresh) {
       await query(
-        `INSERT INTO markets (condition_id, question, slug, closed, status, winning_index, fees_enabled, end_date, fetched_at, token_ids)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO markets (condition_id, question, slug, closed, status, winning_index, fees_enabled, end_date, fetched_at, token_ids, is_sports)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (condition_id) DO UPDATE SET question=EXCLUDED.question, slug=EXCLUDED.slug,
            closed=EXCLUDED.closed, status=EXCLUDED.status, winning_index=EXCLUDED.winning_index,
-           fees_enabled=EXCLUDED.fees_enabled, end_date=EXCLUDED.end_date, fetched_at=EXCLUDED.fetched_at, token_ids=EXCLUDED.token_ids`,
-        [m.condition_id, m.question, m.slug, m.closed, m.status, m.winning_index, m.fees_enabled, m.end_date, now, JSON.stringify(m.token_ids)]
+           fees_enabled=EXCLUDED.fees_enabled, end_date=EXCLUDED.end_date, fetched_at=EXCLUDED.fetched_at, token_ids=EXCLUDED.token_ids, is_sports=EXCLUDED.is_sports`,
+        [m.condition_id, m.question, m.slug, m.closed, m.status, m.winning_index, m.fees_enabled, m.end_date, now, JSON.stringify(m.token_ids), m.is_sports]
       );
       result.set(m.condition_id, { ...m, fetched_at: now });
     }

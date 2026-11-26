@@ -1,3 +1,5 @@
+// Applied on start by both the worker and the dashboard. Safe to run repeatedly.
+export const SCHEMA_SQL = `
 -- Applied automatically by the worker on start. Safe to run repeatedly.
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -107,3 +109,26 @@ CREATE TABLE IF NOT EXISTS worker_status (
   started_at  BIGINT NOT NULL,
   info        JSONB
 );
+
+-- v2 additions
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS token_ids JSONB;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS is_sports BOOLEAN;
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS score_version INT;
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS edge DOUBLE PRECISION;
+ALTER TABLE paper_bets ADD COLUMN IF NOT EXISTS current_bid DOUBLE PRECISION;
+ALTER TABLE paper_bets ADD COLUMN IF NOT EXISTS current_at BIGINT;
+
+-- Paper bankroll history, one row every few minutes.
+CREATE TABLE IF NOT EXISTS equity_snapshots (
+  ts          BIGINT PRIMARY KEY,
+  equity      DOUBLE PRECISION NOT NULL,
+  realized    DOUBLE PRECISION NOT NULL,
+  unrealized  DOUBLE PRECISION NOT NULL,
+  open_count  INT NOT NULL
+);
+
+-- v1 bug: the first REST poll after start-up treated old trades as new. Bets placed
+-- more than 10 minutes after the insider's trade are not a fair test, so exclude them.
+UPDATE paper_bets SET status = 'excluded'
+WHERE status IN ('open', 'unfillable') AND filled_at - trade_ts > 600000;
+`;

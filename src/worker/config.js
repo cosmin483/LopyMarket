@@ -25,6 +25,8 @@ export const config = {
   minTradeUsd: num('MIN_TRADE_USD', 1000), // trades smaller than this are ignored entirely
   restPollMs: num('REST_POLL_MS', 15000), // backup REST poll of the global trade feed
   tradeRetentionDays: num('TRADE_RETENTION_DAYS', 30),
+  maxSignalAgeSec: num('MAX_SIGNAL_AGE_SEC', 90), // never act on trades older than this (e.g. start-up backlog)
+  excludeSports: process.env.EXCLUDE_SPORTS !== '0', // live sports/esports long shots are mostly in-play traders, not insiders
 
   // Early-signal scoring of individual trades
   signalThreshold: num('SIGNAL_THRESHOLD', 60), // 0..100, a trade at/above this opens a paper bet
@@ -41,6 +43,10 @@ export const config = {
   scoreMinPositionUsd: num('SCORE_MIN_POSITION_USD', 20), // ignore dust positions in track records
   suspectMinResolved: num('SUSPECT_MIN_RESOLVED', 5),
   suspectMaxLog10P: num('SUSPECT_MAX_LOG10_P', -4), // record has <= 1-in-10,000 odds of being luck
+  // Extra wins per bet above what the prices implied. Insiders win far more than expected on
+  // each bet; sharp traders and favourite-grinders win only slightly more over hundreds of bets.
+  suspectMinEdge: num('SUSPECT_MIN_EDGE', 0.15),
+  trackRecordMaxEntry: num('TRACK_RECORD_MAX_ENTRY', 0.7), // ignore near-certain favourites in track records
   walletRescoreHours: num('WALLET_RESCORE_HOURS', 12),
   walletHistoryMaxTrades: num('WALLET_HISTORY_MAX_TRADES', 3000),
   walletQueueConcurrency: num('WALLET_QUEUE_CONCURRENCY', 2),
@@ -51,4 +57,7 @@ export const config = {
   takerFeePct: num('TAKER_FEE_PCT', 1), // applied only on markets with fees enabled; approximation
   markDelaysSec: list('MARK_DELAYS_SEC', '5,30,120,600').map(Number),
   resolveEveryMs: num('RESOLVE_EVERY_MS', 5 * 60 * 1000),
+  startBankroll: num('START_BANKROLL', 1000), // the paper bankroll the dashboard counts from
+  priceRefreshMs: num('PRICE_REFRESH_MS', 60000), // re-value open bets
+  equitySnapshotMs: num('EQUITY_SNAPSHOT_MS', 5 * 60 * 1000),
 };

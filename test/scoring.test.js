@@ -89,3 +89,35 @@ test('parses resolved, void and open markets', () => {
   assert.equal(parseMarket({ conditionId: '0x1', closed: true, outcomePrices: '["0.5","0.5"]' }).status, 'void');
   assert.equal(parseMarket({ conditionId: '0x1', closed: false, outcomePrices: '["0.2","0.8"]' }).status, 'open');
 });
+
+test('favourite-grinders and sharp traders are not suspects, long-shot insiders are', () => {
+  const opts = { minResolved: 5, maxLog10P: -4, minEdge: 0.15 };
+  const markets = new Map();
+  const grinder = [];
+  const sharp = [];
+  for (let i = 0; i < 900; i++) {
+    markets.set(`g${i}`, { status: 'resolved', winning_index: i < 897 ? 0 : 1 });
+    grinder.push(mk(`g${i}`, 0, 'BUY', 0.97, 1000)); // like 930/933 vs 903.7 expected
+  }
+  for (let i = 0; i < 430; i++) {
+    markets.set(`s${i}`, { status: 'resolved', winning_index: i < 280 ? 0 : 1 });
+    sharp.push(mk(`s${i}`, 0, 'BUY', 0.54, 1000)); // edge ~0.11 per bet over 430 bets
+  }
+  const g = walletTrackRecord(grinder, markets, { maxEntry: 0.7 });
+  assert.equal(g.n_resolved, 0, 'near-certain favourites are excluded from the record');
+  const sh = walletTrackRecord(sharp, markets, { maxEntry: 0.7 });
+  assert.ok(sh.log10_p < -4, 'statistically significant…');
+  assert.ok(!isSuspect(sh, opts), '…but a small edge per bet is skill, not inside information');
+});
+
+test('sports markets can be excluded from track records', () => {
+  const markets = new Map([['m', { status: 'resolved', winning_index: 0, is_sports: true }]]);
+  assert.equal(walletTrackRecord([mk('m', 0, 'BUY', 0.1, 1000)], markets, { excludeSports: true }).n_resolved, 0);
+});
+
+test('sports titles are recognised', async () => {
+  const { looksLikeSports } = await import('../src/worker/polymarket.js');
+  assert.ok(looksLikeSports('Dota 2: 1win vs Team Liquid - Game 2 Winner'));
+  assert.ok(looksLikeSports('Will Mjällby AIF win on 2026-11-26?'));
+  assert.ok(!looksLikeSports('US strike on Iran by Friday?'));
+});

@@ -2,9 +2,10 @@
 // record what later entries would have cost, and settle when markets resolve.
 import { config } from './config.js';
 import { query } from './db.js';
-import { fetchBook, vwapForStake } from './polymarket.js';
+import { fetchBook, fetchBestPrices, vwapForStake } from './polymarket.js';
 import { getMarkets } from './markets.js';
 import { log } from './log.js';
+import { EQUITY_SQL } from './equity.js';
 
 async function priceNow(tokenId) {
   try {
@@ -91,4 +92,27 @@ export async function settleOpenBets() {
     settled++;
   }
   return settled;
+}
+
+// Re-value open bets at the best bid: what we could sell them for right now.
+export async function refreshOpenBetPrices() {
+  const { rows } = await query(`SELECT DISTINCT token_id FROM paper_bets WHERE status = 'open'`);
+  if (!rows.length) return;
+  const prices = await fetchBestPrices(rows.map((r) => r.token_id));
+  const now = Date.now();
+  for (const [tokenId, p] of prices) {
+    if (p.bid === null) continue;
+    await query(`UPDATE paper_bets SET current_bid = $2, current_at = $3 WHERE token_id = $1 AND status = 'open'`, [tokenId, p.bid, now]);
+  }
+}
+
+export async function snapshotEquity() {
+  const { rows } = await query(EQUITY_SQL);
+  const r = rows[0];
+  const equity = config.startBankroll + r.realized + r.unrealized;
+  await query(
+    `INSERT INTO equity_snapshots (ts, equity, realized, unrealized, open_count) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (ts) DO NOTHING`,
+    [Date.now(), equity, r.realized, r.unrealized, Number(r.open_count)]
+  );
 }

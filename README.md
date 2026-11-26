@@ -36,8 +36,14 @@ Polymarket REST trade feed (every 15s) ─┴─► worker (Railway) ──► P
 
 ### 3. Dashboard: Vercel (free)
 1. At https://vercel.com, choose **Add New → Project → import LopyMarket**.
-2. Under **Environment Variables**, add `DATABASE_URL` (same value) and optionally `DASHBOARD_PASSWORD` (any username works at the login prompt).
+2. Under **Environment Variables**, add `DATABASE_URL` (same value) and `DASHBOARD_PASSWORD` (turns on the login screen).
 3. Deploy.
+
+## Updating
+Both Railway and Vercel redeploy automatically on every push to `main`. If one doesn't:
+- **Vercel:** Project → Deployments → the newest one → ⋯ → Redeploy.
+- **Railway:** the service → Deployments → Deploy latest commit (or ⋯ → Redeploy).
+Database changes apply automatically on start-up; there is nothing to run by hand.
 
 ## Settings (environment variables on Railway)
 
@@ -55,6 +61,11 @@ Polymarket REST trade feed (every 15s) ─┴─► worker (Railway) ──► P
 | `MARK_DELAYS_SEC` | 5,30,120,600 | When to re-check the price after the insider's trade |
 | `REST_POLL_MS` | 15000 | Backup REST poll interval |
 | `SENSITIVE_KEYWORDS` | (list in `config.js`) | Topics where inside information is plausible |
+| `EXCLUDE_SPORTS` | 1 | Skip sports/esports markets (in-play traders, not insiders). Set 0 to include them |
+| `MAX_SIGNAL_AGE_SEC` | 90 | Never copy a trade older than this |
+| `SUSPECT_MIN_EDGE` | 0.15 | Extra wins per bet needed for the watchlist; filters out sharp traders who win slightly more over hundreds of bets |
+| `TRACK_RECORD_MAX_ENTRY` | 0.7 | Positions bought above this price don't count towards a track record |
+| `START_BANKROLL` | 1000 | Paper bankroll the dashboard counts from |
 
 ## Caveats
 - Trade timestamps are block times with 1-second resolution, so latency figures are accurate to about ±1s.
@@ -67,4 +78,5 @@ Polymarket REST trade feed (every 15s) ─┴─► worker (Railway) ──► P
 npm install
 npm test                       # unit tests for scoring, parsing and fills
 node test/mock-server.js       # fake Polymarket APIs on :4010 / ws :4011, for end-to-end runs
+DATABASE_URL=… node test/seed-demo.js   # demo data for a SCRATCH database, to check the dashboard's look
 ```

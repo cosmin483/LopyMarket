@@ -89,6 +89,11 @@ const parseMaybeJson = (v) => {
   return [];
 };
 
+const SPORTS_TITLE = /\bvs\.?\b|\bo\/u\b|\bspread\b|\bmap \d|\bgame \d|\(bo\d\)|\bhandicap\b|\bto win on \d{4}-\d\d-\d\d\b|\bwin on \d{4}-\d\d-\d\d\b/i;
+export const looksLikeSports = (title) => SPORTS_TITLE.test(title || '');
+
+const labels = (arr) => (Array.isArray(arr) ? arr.map((t) => `${t?.label || ''} ${t?.slug || ''} ${t?.name || ''}`).join(' ') : '');
+
 export function parseMarket(m) {
   const prices = parseMaybeJson(m.outcomePrices).map(Number);
   let status = 'open';
@@ -111,6 +116,10 @@ export function parseMarket(m) {
     winning_index: winningIndex,
     fees_enabled: m.feesEnabled ?? null,
     token_ids: parseMaybeJson(m.clobTokenIds).map(String),
+    is_sports:
+      !!(m.gameId || m.sportsMarketType || m.gameStartTime) ||
+      /\bsports?\b|esports?/i.test(`${labels(m.tags)} ${labels(m.categories)} ${(m.events || []).map((e) => labels(e?.tags)).join(' ')} ${m.category || ''}`) ||
+      looksLikeSports(m.question),
     end_date: m.endDate ?? null,
   };
 }
@@ -147,6 +156,21 @@ export function vwapForStake(asks, stakeUsd) {
   }
   if (shares === 0) return { price: null, partial: true };
   return { price: spent / shares, partial: spent < stakeUsd - 1e-6 };
+}
+
+// Best bid/ask for many tokens at once. Returns Map(token_id -> { bid, ask }).
+export async function fetchBestPrices(tokenIds) {
+  const out = new Map();
+  for (let i = 0; i < tokenIds.length; i += 200) {
+    const chunk = tokenIds.slice(i, i + 200);
+    const books = await getJson(`${config.clobApi}/books`, { method: 'POST', body: chunk.map((t) => ({ token_id: t })) });
+    for (const b of Array.isArray(books) ? books : []) {
+      const bids = (b.bids || []).map((l) => Number(l.price)).filter((p) => p > 0);
+      const asks = (b.asks || []).map((l) => Number(l.price)).filter((p) => p > 0);
+      out.set(String(b.asset_id), { bid: bids.length ? Math.max(...bids) : null, ask: asks.length ? Math.min(...asks) : null });
+    }
+  }
+  return out;
 }
 
 export async function fetchBook(tokenId) {

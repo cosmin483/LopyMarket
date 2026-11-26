@@ -1,16 +1,23 @@
 import { NextResponse } from 'next/server';
+import { SESSION_COOKIE, sessionToken, safeEqual } from './lib/auth.js';
 
-// Optional password protection: set DASHBOARD_PASSWORD in Vercel (any username works).
-export function middleware(req) {
+// Password protection is on when DASHBOARD_PASSWORD is set in Vercel.
+export async function middleware(req) {
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return NextResponse.next();
-  const header = req.headers.get('authorization') || '';
-  if (header.startsWith('Basic ')) {
-    const decoded = atob(header.slice(6));
-    if (decoded.slice(decoded.indexOf(':') + 1) === password) return NextResponse.next();
+
+  const cookie = req.cookies.get(SESSION_COOKIE)?.value;
+  if (cookie && safeEqual(cookie, await sessionToken(password))) return NextResponse.next();
+
+  if (req.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
   }
-  return new NextResponse('Authentication required', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="LopyMarket"' },
-  });
+  const login = req.nextUrl.clone();
+  login.pathname = '/login';
+  login.search = '';
+  return NextResponse.redirect(login);
 }
+
+export const config = {
+  matcher: ['/((?!_next/|login|api/login|icon.svg|favicon.ico).*)'],
+};

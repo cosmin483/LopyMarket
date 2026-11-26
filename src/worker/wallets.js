@@ -6,12 +6,15 @@ import { fetchWalletTrades, normalizeTrade } from './polymarket.js';
 import { walletTrackRecord, isSuspect } from './scoring.js';
 import { log } from './log.js';
 
+// Bump when the scoring rules change; older scores are recomputed on start-up.
+export const SCORE_VERSION = 2;
+
 export async function getWallet(address) {
   const { rows } = await query('SELECT * FROM wallets WHERE address = $1', [address]);
   return rows[0] || null;
 }
 
-const isFresh = (w) => w && w.scored_at && Date.now() - w.scored_at < config.walletRescoreHours * 3600000;
+const isFresh = (w) => w && w.scored_at && w.score_version === SCORE_VERSION && Date.now() - w.scored_at < config.walletRescoreHours * 3600000;
 
 // Returns the stored wallet row, (re)scoring it first if missing or stale.
 // `force` rescoring is used when a known wallet makes a new trade we may copy,
@@ -26,24 +29,34 @@ export async function scoreWallet(address) {
   const { rows: raw, capped } = await fetchWalletTrades(address, config.walletHistoryMaxTrades);
   const trades = raw.map((r) => normalizeTrade(r, 'history')).filter(Boolean);
   const markets = await getMarkets(trades.map((t) => t.condition_id), { maxAgeMs: 6 * 3600000 });
-  const rec = walletTrackRecord(trades, markets, { minPositionUsd: config.scoreMinPositionUsd });
+  const rec = walletTrackRecord(trades, markets, {
+    minPositionUsd: config.scoreMinPositionUsd,
+    maxEntry: config.trackRecordMaxEntry,
+    excludeSports: config.excludeSports,
+  });
   const firstTs = trades.length ? Math.min(...trades.map((t) => t.trade_ts)) : null;
-  const suspect = isSuspect(rec, { minResolved: config.suspectMinResolved, maxLog10P: config.suspectMaxLog10P });
+  const suspect = isSuspect(rec, {
+    minResolved: config.suspectMinResolved,
+    maxLog10P: config.suspectMaxLog10P,
+    minEdge: config.suspectMinEdge,
+  });
   const name = trades.find((t) => t.name)?.name ?? null;
 
   const { rows } = await query(
     `INSERT INTO wallets (address, first_trade_ts, history_capped, n_trades, n_markets, n_resolved, wins,
-       expected_wins, z_score, log10_p, cost_resolved, pnl_resolved, suspect, name, scored_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       expected_wins, z_score, log10_p, cost_resolved, pnl_resolved, suspect, name, scored_at, score_version, edge)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (address) DO UPDATE SET first_trade_ts=EXCLUDED.first_trade_ts, history_capped=EXCLUDED.history_capped,
        n_trades=EXCLUDED.n_trades, n_markets=EXCLUDED.n_markets, n_resolved=EXCLUDED.n_resolved, wins=EXCLUDED.wins,
        expected_wins=EXCLUDED.expected_wins, z_score=EXCLUDED.z_score, log10_p=EXCLUDED.log10_p,
        cost_resolved=EXCLUDED.cost_resolved, pnl_resolved=EXCLUDED.pnl_resolved, suspect=EXCLUDED.suspect,
-       name=COALESCE(EXCLUDED.name, wallets.name), scored_at=EXCLUDED.scored_at
+       name=COALESCE(EXCLUDED.name, wallets.name), scored_at=EXCLUDED.scored_at,
+       score_version=EXCLUDED.score_version, edge=EXCLUDED.edge
      RETURNING *`,
     [
       address, capped ? null : firstTs, capped, trades.length, rec.n_markets, rec.n_resolved, rec.wins,
       rec.expected_wins, rec.z_score, rec.log10_p, rec.cost_resolved, rec.pnl_resolved, suspect, name, Date.now(),
+      SCORE_VERSION, rec.edge,
     ]
   );
   if (suspect) {
